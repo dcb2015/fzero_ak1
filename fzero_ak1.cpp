@@ -98,7 +98,15 @@ void outCodeandKount(short erFlag, short fxneval){ //Output error code and ikoun
 	case 2:	cout << "Error Code = 2: A zero has been found, but the interval has not\n";
 		cout << "collapsed to the requested tolerance.\n";
 		break;
-	case 3:	cout << "Error Code = 3: More than MAXIT (=100) function evaluations used.\n";
+	case 3:	cout << "Error Code = 3: Possibly near a singular point. The interval has collapsed to the\n";
+		cout << "requested tolerance and the function changes sign over the interval,\n";
+		cout << "but the magnitude of the function increased as the interval collapsed.\n";
+		break;
+	case 4:	cout << "Error Code = 4: The function does not change sign over the specified interval, which\n";
+		cout << "has collapsed to the requested tolerance. Possibly near a minimum of\n";
+		cout << "the function or a zero of even multiplicity.\n";
+		break;
+	case 5:	cout << "Error Code = 5: More than MAXIT (= 200) function evaluations used.\n";
 		break;
 	default:	cout << "Invalid Error Code.\n";
 	} //End switch
@@ -132,81 +140,141 @@ void fzero_ak1(ZTYPE *zd, double ecc) {
 	Authors:	Shampine, L.F., SNLA
 	Watts, H.A., SNLA */
 
-	static const short MAXIT = 100;
-	static const double er = DBL_EPSILON; //Machine epsilon for type double
-	double a, acbs, acmb, cmb, fa, fb, fc, fz, p, q, rw, t, tol, z;
+	static const short MAXIT = 200;
+	double RW = 2.0 * DBL_EPSILON; //Machine epsilon for type double
+	double a, acbs, acmb, cmb, fa, fb, fc, fx, fz, p, q, t, tol, z;
 	short ic = 0;
 
 	//Initialize
 
-	rw = DBL_EPSILON;  //((zd->re > er) ? zd->re : er);
-	z = zd->b + ecc / 2 / 2; //In this case zd->c - zd->b = ecc/2
-	fc = fz = f(z); t = zd->b; fb = f(t);
+	if (RW < zd->re) RW = zd->re;
+
+	z = zd->c;
+	t = zd->b;
+	z = t + 0.5 * (z - t);
+
+	fc = fz = f(z);
+	fb = f(t);
 	zd->kount = 2;
-	if (sign(fz) == sign(fb))
-	{
-		t = zd->c; fc = f(t); zd->kount = 3;
-		if (sign(fz) != sign(fc))	{ zd->b = z; fb = fz; }
+
+	if (sign(fz) == sign(fb)) {
+		t = zd->c;
+		fc = f(t);
+		zd->kount = 3;
+		if (sign(fz) != sign(fc)) {
+			zd->b = z;
+			fb = fz;
+		}
 	}
 	else zd->c = z;
-	a = zd->c; fa = fc; acbs = ecc / 2 / 2; //In this case, fabs(zd->b - zd->c) = ecc/4, since z was bisected in line 1;
+
+	a = zd->c;
+	fa = fc;
+	acbs = fabs(zd->c - zd->b);
+
+	fx = fabs(fb);
+	if (fx < fabs(fc)) fx = fabs(fc);
 
 	do
 	{
-		if (fabs(fc) < fabs(fb))		//Interchange if necessary
-		{
-			a = zd->b; fa = fb; zd->b = zd->c; fb = fc; zd->c = a; fc = fa;
+		if (fabs(fc) < fabs(fb)) { //Interchange if necessary
+			a = zd->b;
+			fa = fb;
+			zd->b = zd->c;
+			fb = fc;
+			zd->c = a;
+			fc = fa;
 		}
-		cmb = (zd->c - zd->b) / 2; acmb = fabs(cmb);
-		tol = fabs(zd->b);
-		tol++;
-		tol *= rw;  //tol = rw*fabs(zd->b) + zd->ae
 
-		//Test-stopping criteria and function count
+		cmb = 0.5 * (zd->c - zd->b);
+		acmb = fabs(cmb);
+		tol = RW * fabs(zd->b) + zd->ae;
 
-		if (acmb <= tol) { zd->iflag = 1;	return; }	//Normal completion
+		//Test-stopping criterion and function count
 
-		if (fb == 0){ zd->iflag = 2; return; }
+		if (acmb <= tol) break;
+
+		if (fb == 0){
+			zd->iflag = 2;
+			return;
+		}
+
+		if (zd->kount >= MAXIT) {
+			zd->iflag = 5;
+			return;
+		}
 
 		/*Calculate new iterate implicitly as b + p/q, where p is arranged to be
 		>= 0. This implicit form is used to prevent overflow.*/
 
-		p = (zd->b - a)*fb; q = fa - fb;
-		if (p < 0) { p = -p; q = -q; }
+		p = (zd->b - a)*fb;
+		q = fa - fb;
+
+		if (p < 0) {
+			p = -p;
+			q = -q;
+		}
 
 		/*Update a and check for satisfactory reduction in the size of the bracketing
 		interval. If not, perform bisection.*/
 
-		a = zd->b; fa = fb; ic++;
+		a = zd->b;
+		fa = fb;
+		++ic;
+
 		if ((ic >= 4) && (8 * acmb >= acbs))
-			zd->b = (zd->c + zd->b) / 2;				//Use bisection
+			zd->b = 0.5 * (zd->c + zd->b);
 		else
 		{
-			if (ic >= 4) { ic = 0; acbs = acmb; }
+			if (ic >= 4) {
+				ic = 0;
+				acbs = acmb;
+			}
 			if (p <= tol*fabs(q))			//Test for too small a change
 				zd->b += tol*sign(cmb);
 			else							//Root between b and (b + c)/2
 			{
 				if (p < cmb*q) zd->b += p / q;	//Use secant rule
-				else zd->b = (zd->c + zd->b) / 2;
+				else zd->b = 0.5 * (zd->c + zd->b);
 			}
-		}	//Use bisection.
+		} // End else !((ic >= 4) && (8 * acmb >= acbs))
+
 		//Have now computed new iterate,b.
-		fb = f(zd->b); (zd->kount)++;
+		fb = f(zd->b);
+		zd->kount += 1;
 
 		//Decide if next step interpolation or extrapolation.
 
-		if (sign(fb) == sign(fc)) { zd->c = a; fc = fa; }
-	} while (zd->kount < MAXIT);				//End while loop
-	if (zd->kount >= MAXIT) zd->iflag = 3;	//Too many iterations
+		if (sign(fb) == sign(fc)) {
+			zd->c = a;
+			fc = fa;
+		}
+
+	} while (zd->kount < MAXIT);	//End while loop
+
+	if (sign(fb) == sign(fc)) {
+		zd->iflag = 4;
+	} // end if (sign(fb) == sign(fc))
+	else {// else (sign(fb) != sign(fc))
+
+		if (fabs(fb) > fx){
+			zd->iflag = 3;
+		} // End if (fabs(fb) > fx)
+
+		else { // else (fabs(fb) <= fx)
+			zd->iflag = 1;
+		} // End // else (fabs(fb) <= fx)
+
+	} // end else (sign(fb) != sign(fc))
+
 	return;
-}											//End fzero
+}											//End fzero_ak1
 
 int main(){
 
 	char rflag = 0;				//Readiness flag
 
-	cout << "                  fzero_ak1 (23 April 2017)\n";
+	cout << "                  fzero_ak1 (24 April 2017)\n";
 	cout << "=================================================================\n";
 	cout << "This program calculates the power of a sech function which approximates the\n";
 	cout << "value of sin(E) at the quarter period for\n";
@@ -228,10 +296,13 @@ int main(){
 		dumvar.ae = dumvar.re = DBL_EPSILON;
 
 		fzero_ak1(&dumvar, ECC);
+
 		cout << "\nThe solution p-value is " << dumvar.b << ".\n";
+
 		outCodeandKount(dumvar.iflag, dumvar.kount);
 	}
 	else cout << "\nNot ready. Try again when ready with information.\n";
+
 	cout << "\nEnter any key to continue.\n";
 	cin >> rflag;
 	return 0;
